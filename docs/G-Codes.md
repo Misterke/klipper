@@ -180,14 +180,17 @@ generate height maps approximating the bed's surface.
 adjustment.  It is recommended to put this in your end-gcode.
 
 #### BED_MESH_PROFILE
-`BED_MESH_PROFILE LOAD=<name> SAVE=<name> REMOVE=<name>`: This command
-provides profile management for mesh state. LOAD will restore the mesh
-state from the profile matching the supplied name. SAVE will save the
-current mesh state to a profile matching the supplied name. Remove
-will delete the profile matching the supplied name from persistent
-memory. Note that after SAVE or REMOVE operations have been run the
-SAVE_CONFIG gcode must be run to make the changes to persistent memory
-permanent.
+`BED_MESH_PROFILE LOAD=<name> SAVE=<name> REMOVE=<name> SET=<def>`:
+This command provides profile management for mesh state. LOAD will
+restore the mesh state from the profile matching the supplied
+name. SAVE will save the current mesh state to a profile matching the
+supplied name. REMOVE will delete the profile matching the supplied
+name from persistent memory. Note that after SAVE or REMOVE operations
+have been run the SAVE_CONFIG gcode must be run to make the changes to
+persistent memory permanent.  SET allows setting the mesh by passing
+a string-representation of the dict that defines the mesh.  This is
+the same dict as found in printer.bed_mesh.profiles for each of the
+currently defined profiles.
 
 #### BED_MESH_OFFSET
 `BED_MESH_OFFSET [X=<value>] [Y=<value>] [ZFADE=<value]`: Applies X, Y,
