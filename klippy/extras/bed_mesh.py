@@ -4,7 +4,7 @@
 # Copyright (C) 2018-2019 Eric Callahan <arksine.code@gmail.com>
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
-import logging, math, json, collections
+import logging, math, json, ast, collections, traceback
 from . import probe
 
 PROFILE_VERSION = 1
@@ -1123,8 +1123,7 @@ class ProfileManager:
             self.profiles[name] = {}
             zvals = profile.getlists('points', seps=(',', '\n'), parser=float)
             self.profiles[name]['points'] = zvals
-            self.profiles[name]['mesh_params'] = params = \
-                collections.OrderedDict()
+            self.profiles[name]['mesh_params'] = params = {}
             for key, t in PROFILE_OPTIONS.items():
                 if t is int:
                     params[key] = profile.getint(key)
@@ -1178,7 +1177,7 @@ class ProfileManager:
         profiles = dict(self.profiles)
         profiles[prof_name] = profile = {}
         profile['points'] = probed_matrix
-        profile['mesh_params'] = collections.OrderedDict(mesh_params)
+        profile['mesh_params'] = dict(mesh_params)
         self.profiles = profiles
         self.current_profile = prof_name
         self.bedmesh.update_status()
@@ -1187,6 +1186,29 @@ class ProfileManager:
             "for the current session.  The SAVE_CONFIG command will\n"
             "update the printer config file and restart the printer."
             % (prof_name))
+    def set_profile(self, profile):
+        try:
+            profile = ast.literal_eval(profile)
+            probed_matrix = profile["points"]
+            mesh_params = profile["mesh_params"];
+            for key, t in PROFILE_OPTIONS.items():
+                if t is int:
+                    mesh_params[key] = int(mesh_params[key])
+                elif t is float:
+                    mesh_params[key] = float(mesh_params[key])
+                elif t is str:
+                    mesh_params[key] = str(mesh_params[key])
+            z_mesh = ZMesh(mesh_params)
+            try:
+                z_mesh.build_mesh(probed_matrix)
+            except BedMeshError as e:
+                raise self.gcode.error(str(e))
+            self.current_profile = "default"
+            self.bedmesh.set_mesh(z_mesh)
+            self.gcode.respond_info(
+                "Bed Mesh state set to profile \"default\".")
+        except:
+            raise self.gcode.error(traceback.format_exc())
     def load_profile(self, prof_name):
         profile = self.profiles.get(prof_name, None)
         if profile is None:
@@ -1219,6 +1241,7 @@ class ProfileManager:
     cmd_BED_MESH_PROFILE_help = "Bed Mesh Persistent Storage management"
     def cmd_BED_MESH_PROFILE(self, gcmd):
         options = collections.OrderedDict({
+            'SET': self.set_profile,
             'LOAD': self.load_profile,
             'SAVE': self.save_profile,
             'REMOVE': self.remove_profile
