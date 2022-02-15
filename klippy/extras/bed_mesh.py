@@ -782,7 +782,8 @@ class BedMeshCalibrate:
         self.bedmesh.set_mesh(z_mesh)
         self.gcode.respond_info("Mesh Bed Leveling Complete")
         if self._profile_name is not None:
-            self.bedmesh.save_profile(self._profile_name)
+            self.bedmesh.save_profile(self._profile_name, 1)
+
     def _dump_points(self, probed_pts, corrected_pts, offsets):
         # logs generated points with offset applied, points received
         # from the finalize callback, and the list of corrected points
@@ -1671,7 +1672,7 @@ class ProfileManager:
                 "The SAVE_CONFIG command will update the printer config\n"
                 "file and restart the printer" %
                 (('\n').join(self.incompatible_profiles)))
-    def save_profile(self, prof_name):
+    def save_profile(self, prof_name, quiet):
         z_mesh = self.bedmesh.get_mesh()
         if z_mesh is None:
             self.gcode.respond_info(
@@ -1701,12 +1702,13 @@ class ProfileManager:
         profile['mesh_params'] = dict(mesh_params)
         self.profiles = profiles
         self.bedmesh.update_status()
-        self.gcode.respond_info(
-            "Bed Mesh state has been saved to profile [%s]\n"
-            "for the current session.  The SAVE_CONFIG command will\n"
-            "update the printer config file and restart the printer."
-            % (prof_name))
-    def set_profile(self, profile):
+        if not quiet:
+            self.gcode.respond_info(
+                "Bed Mesh state has been saved to profile [%s]\n"
+                "for the current session.  The SAVE_CONFIG command will\n"
+                "update the printer config file and restart the printer."
+                % (prof_name))
+    def set_profile(self, profile, quiet):
         try:
             profile = ast.literal_eval(profile)
             probed_matrix = profile["points"]
@@ -1725,11 +1727,12 @@ class ProfileManager:
                 raise self.gcode.error(str(e))
             self.current_profile = "default"
             self.bedmesh.set_mesh(z_mesh)
-            self.gcode.respond_info(
-                "Bed Mesh state set to profile \"default\".")
+            if not quiet:
+                self.gcode.respond_info(
+                    "Bed Mesh state set to profile \"default\".")
         except:
             raise self.gcode.error(traceback.format_exc())
-    def load_profile(self, prof_name):
+    def load_profile(self, prof_name, quiet):
         profile = self.profiles.get(prof_name, None)
         if profile is None:
             raise self.gcode.error(
@@ -1742,7 +1745,7 @@ class ProfileManager:
         except BedMeshError as e:
             raise self.gcode.error(str(e))
         self.bedmesh.set_mesh(z_mesh)
-    def remove_profile(self, prof_name):
+    def remove_profile(self, prof_name, quiet):
         if prof_name in self.profiles:
             configfile = self.printer.lookup_object('configfile')
             configfile.remove_section('bed_mesh ' + prof_name)
@@ -1750,13 +1753,15 @@ class ProfileManager:
             del profiles[prof_name]
             self.profiles = profiles
             self.bedmesh.update_status()
-            self.gcode.respond_info(
-                "Profile [%s] removed from storage for this session.\n"
-                "The SAVE_CONFIG command will update the printer\n"
-                "configuration and restart the printer" % (prof_name))
+            if not quiet:
+                self.gcode.respond_info(
+                    "Profile [%s] removed from storage for this session.\n"
+                    "The SAVE_CONFIG command will update the printer\n"
+                    "configuration and restart the printer" % (prof_name))
         else:
-            self.gcode.respond_info(
-                "No profile named [%s] to remove" % (prof_name))
+            if not quiet:
+                self.gcode.respond_info(
+                    "No profile named [%s] to remove" % (prof_name))
     cmd_BED_MESH_PROFILE_help = "Bed Mesh Persistent Storage management"
     def cmd_BED_MESH_PROFILE(self, gcmd):
         options = collections.OrderedDict({
@@ -1777,7 +1782,7 @@ class ProfileManager:
                         "Profile 'default' is reserved, please choose"
                         " another profile name.")
                 else:
-                    options[key](name)
+                    options[key](name, gcmd.get_int("QUIET", 0))
                 return
         gcmd.respond_info("Invalid syntax '%s'" % (gcmd.get_commandline(),))
 
