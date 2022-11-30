@@ -376,6 +376,7 @@ class ProbePointsHelper:
                                                 parser=float, count=2)
         def_move_z = config.getfloat('horizontal_move_z', 5.)
         self.default_horizontal_move_z = def_move_z
+        self.fast_drop_z = config.getfloat('fast_drop_z', self.horizontal_move_z);
         self.speed = config.getfloat('speed', 50., above=0.)
         self.use_offsets = False
         # Internal probing state
@@ -414,6 +415,8 @@ class ProbePointsHelper:
             nextpos[0] -= self.probe_offsets[0]
             nextpos[1] -= self.probe_offsets[1]
         toolhead.manual_move(nextpos, self.speed)
+        if self.fast_drop_z != self.horizontal_move_z:
+            toolhead.manual_move([None, None, self.fast_drop_z], speed)
         return False
     def start_probe(self, gcmd):
         manual_probe.verify_no_manual_probe(self.printer)
