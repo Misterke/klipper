@@ -114,6 +114,8 @@ class RetryHelper:
             "Retries: %d/%d %s: %0.6f tolerance: %0.6f" % (
                 self.current_retry, self.max_retries, self.value_label,
                 error, self.retry_tolerance))
+        self.gcode.run_script_from_command("M117 Z-TILT %d: %0.6f" % (
+            self.current_retry, error))
         if self.check_increase(error):
             raise self.gcode.error("Retries aborting: %s is increasing. %s"
                                    % (self.value_label, self.error_msg_extra))
