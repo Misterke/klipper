@@ -439,7 +439,7 @@ class ProbePointsHelper:
         maxZ = max(zresults)
         self.gcode.run_script_from_command("M117 DEV: %0.3f (%0.3f - %0.3f)" %
                 (maxZ-minZ, minZ, maxZ))
-        
+
     def _manual_probe_start(self):
         done = self._move_next()
         if not done:
