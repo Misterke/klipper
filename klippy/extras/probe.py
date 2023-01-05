@@ -376,7 +376,8 @@ class ProbePointsHelper:
                                                 parser=float, count=2)
         def_move_z = config.getfloat('horizontal_move_z', 5.)
         self.default_horizontal_move_z = def_move_z
-        self.fast_drop_z = config.getfloat('fast_drop_z', self.horizontal_move_z);
+        self.fast_drop_z = config.getfloat('fast_drop_z',
+            self.horizontal_move_z);
         self.speed = config.getfloat('speed', 50., above=0.)
         self.use_offsets = False
         # Internal probing state
@@ -446,7 +447,15 @@ class ProbePointsHelper:
                 break
             pos = probe.run_probe(gcmd)
             self.results.append(pos)
+            self.gcode.run_script_from_command("M117 PROBE %0.3f,%0.3f,%0.3f" %
+                (pos[0], pos[1], pos[2]))
         probe.multi_probe_end()
+        zresults = [p[2] for p in self.results]
+        minZ = min(zresults)
+        maxZ = max(zresults)
+        self.gcode.run_script_from_command("M117 DEV: %0.3f (%0.3f - %0.3f)" %
+                (maxZ-minZ, minZ, maxZ))
+
     def _manual_probe_start(self):
         done = self._move_next()
         if not done:
