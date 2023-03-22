@@ -378,6 +378,7 @@ class ProbePointsHelper:
         self.default_horizontal_move_z = def_move_z
         self.fast_drop_z = config.getfloat('fast_drop_z',
             self.horizontal_move_z);
+        self.inversed_order = False;
         self.speed = config.getfloat('speed', 50., above=0.)
         self.use_offsets = False
         # Internal probing state
@@ -388,6 +389,8 @@ class ProbePointsHelper:
         if len(self.probe_points) < n:
             raise self.printer.config_error(
                 "Need at least %d probe points for %s" % (n, self.name))
+    def inverse_order(self,i=None):
+        self.inversed_order = (not self.inversed_order) if i is None else i
     def update_probe_points(self, points, min_points):
         self.probe_points = points
         self.minimum_points(min_points)
@@ -406,12 +409,16 @@ class ProbePointsHelper:
         # Check if done probing
         if len(self.results) >= len(self.probe_points):
             toolhead.get_last_move_time()
+            if self.inversed_order:
+                self.results.reverse()
             res = self.finalize_callback(self.probe_offsets, self.results)
             if res != "retry":
                 return True
             self.results = []
         # Move to next XY probe point
-        nextpos = list(self.probe_points[len(self.results)])
+        nextpos = list(self.probe_points[
+            (len(self.probe_points)-1-len(self.results))
+                if self.inversed_order else len(self.results)])
         if self.use_offsets:
             nextpos[0] -= self.probe_offsets[0]
             nextpos[1] -= self.probe_offsets[1]
@@ -447,8 +454,8 @@ class ProbePointsHelper:
                 break
             pos = probe.run_probe(gcmd)
             self.results.append(pos)
-            self.gcode.run_script_from_command("M117 PROBE %0.3f,%0.3f,%0.3f" %
-                (pos[0], pos[1], pos[2]))
+            #self.gcode.run_script_from_command("M117 PROBE %0.3f,%0.3f,%0.3f" %
+            #    (pos[0], pos[1], pos[2]))
         probe.multi_probe_end()
         zresults = [p[2] for p in self.results]
         minZ = min(zresults)
