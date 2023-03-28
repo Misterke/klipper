@@ -10,7 +10,7 @@ PROFILE_VERSION = 1
 PROFILE_OPTIONS = {
     'min_x': float, 'max_x': float, 'min_y': float, 'max_y': float,
     'x_count': int, 'y_count': int, 'mesh_x_pps': int, 'mesh_y_pps': int,
-    'algo': str, 'tension': float
+    'algo': str, 'tension': float, 'order': str
 }
 
 class BedMeshError(Exception):
@@ -287,7 +287,7 @@ class BedMeshCalibrate:
     ALGOS = ['lagrange', 'bicubic']
     def __init__(self, config, bedmesh):
         self.printer = config.get_printer()
-        self.orig_config = {'radius': None, 'origin': None}
+        self.orig_config = {'radius': None, 'origin': None, 'order': ''}
         self.radius = self.origin = None
         self.mesh_min = self.mesh_max = (0., 0.)
         self.adaptive_margin = config.getfloat('adaptive_margin', 0.0)
@@ -347,24 +347,62 @@ class BedMeshCalibrate:
             max_x = min_x + x_dist * (x_cnt - 1)
         pos_y = min_y
         points = []
-        for i in range(y_cnt):
-            for j in range(x_cnt):
-                if not i % 2:
-                    # move in positive directon
-                    pos_x = min_x + j * x_dist
-                else:
-                    # move in negative direction
-                    pos_x = max_x - j * x_dist
-                if self.radius is None:
-                    # rectangular bed, append
-                    points.append((pos_x, pos_y))
-                else:
-                    # round bed, check distance from origin
-                    dist_from_origin = math.sqrt(pos_x*pos_x + pos_y*pos_y)
-                    if dist_from_origin <= self.radius:
-                        points.append(
-                            (self.origin[0] + pos_x, self.origin[1] + pos_y))
-            pos_y += y_dist
+
+        order = self.mesh_config['order'];
+        if order == 'spiral':
+            # We want to end at the front-left, so we start there
+            # and walk in the intended direction until we hit a
+            # limit, at which point that limit changes and we turn
+            # 90 degrees ...
+            wall_thickness = 0
+            i = 0
+            j = 0
+            points.append((min_x, min_y))
+            while True:
+                if i >= y_cnt - 1 - wall_thickness:
+                    break
+                while i < y_cnt - 1 - wall_thickness:
+                    i += 1
+                    points.append((min_x + j * x_dist, min_y + i * y_dist))
+                if j >= x_cnt - 1 - wall_thickness:
+                    break
+                while j < x_cnt - 1 - wall_thickness:
+                    j += 1
+                    points.append((min_x + j * x_dist, min_y + i * y_dist))
+                if i <= wall_thickness:
+                    break
+                while i > wall_thickness:
+                    i -= 1
+                    points.append((min_x + j * x_dist, min_y + i * y_dist))
+                wall_thickness += 1
+                if j <= wall_thickness:
+                    break
+                while j > wall_thickness:
+                    j -= 1
+                    points.append((min_x + j * x_dist, min_y + i * y_dist))
+            points.reverse()
+        else:
+            for i in range(y_cnt):
+                for j in range(x_cnt):
+                    if not i % 2:
+                        # move in positive directon
+                        pos_x = min_x + j * x_dist
+                    else:
+                        # move in negative direction
+                        pos_x = max_x - j * x_dist
+                    if self.radius is None:
+                        # rectangular bed, append
+                        points.append((pos_x, pos_y))
+                    else:
+                        # round bed, check distance from origin
+                        dist_from_origin = math.sqrt(pos_x*pos_x + pos_y*pos_y)
+                        if dist_from_origin <= self.radius:
+                            points.append(
+                                (self.origin[0] + pos_x,
+                                 self.origin[1] + pos_y))
+                pos_y += y_dist
+            if order == 'reverse':
+                points.reverse()
         self.points = points
         rri = self.relative_reference_index
         if self.zero_ref_pos is None and rri is not None:
@@ -384,6 +422,9 @@ class BedMeshCalibrate:
         if not self.faulty_regions:
             return
         self.substituted_indices.clear()
+        if order == 'spiral':
+            raise error("bed_mesh: faulty regions are not supported"
+                        " for spiral order")
         if self.zero_reference_mode == ZrefMode.PROBE:
             # Cannot probe a reference within a faulty region
             for min_c, max_c in self.faulty_regions:
@@ -401,7 +442,7 @@ class BedMeshCalibrate:
         if probe_method == "manual":
             return
         last_y = self.points[0][1]
-        is_reversed = False
+        is_reversed = (order == 'reverse') and ((y_cnt % 2) == 0)
         for i, coord in enumerate(self.points):
             if not isclose(coord[1], last_y):
                 is_reversed = not is_reversed
@@ -469,6 +510,7 @@ class BedMeshCalibrate:
     def _init_mesh_config(self, config):
         mesh_cfg = self.mesh_config
         orig_cfg = self.orig_config
+        order = ''
         self.radius = config.getfloat('mesh_radius', None, above=0.)
         if self.radius is not None:
             self.origin = config.getfloatlist('mesh_origin', (0., 0.), count=2)
@@ -490,6 +532,8 @@ class BedMeshCalibrate:
             max_x, max_y = config.getfloatlist('mesh_max', count=2)
             if max_x <= min_x or max_y <= min_y:
                 raise config.error('bed_mesh: invalid min/max points')
+            order = config.get('order', '').strip().lower()
+        orig_cfg['order'] = mesh_cfg['order'] = order
         orig_cfg['x_count'] = mesh_cfg['x_count'] = x_cnt
         orig_cfg['y_count'] = mesh_cfg['y_count'] = y_cnt
         orig_cfg['mesh_min'] = self.mesh_min = (min_x, min_y)
@@ -720,6 +764,9 @@ class BedMeshCalibrate:
                 self.mesh_config['x_count'] = x_cnt
                 self.mesh_config['y_count'] = y_cnt
                 need_cfg_update = True
+            if "ORDER" in params:
+                self.mesh_config['order'] = gcmd.get('ORDER').strip().lower()
+                need_cfg_update = True
 
         if "ALGORITHM" in params:
             self.mesh_config['algo'] = gcmd.get('ALGORITHM').strip().lower()
@@ -830,22 +877,27 @@ class BedMeshCalibrate:
                         % (off_pt[0], off_pt[1], probed[0], probed[1]))
             positions = corrected_pts
 
+        if self.relative_reference_index is not None:
+            # zero out probe z offset and
+            # set offset relative to reference index
+            z_offset = positions[self.relative_reference_index][2]
+
+        order = params['order']
+
         probed_matrix = []
         row = []
+
+        # Sort the probed points again ...
+        positions = sorted(positions, key = lambda p:(p[1],p[0]));
         prev_pos = positions[0]
         for pos in positions:
             if not isclose(pos[1], prev_pos[1], abs_tol=.1):
                 # y has changed, append row and start new
+                logging.info("  row finished")
                 probed_matrix.append(row)
                 row = []
-            if pos[0] > prev_pos[0]:
-                # probed in the positive direction
-                row.append(pos[2] - z_offset)
-            else:
-                # probed in the negative direction
-                row.insert(0, pos[2] - z_offset)
+            row.append(pos[2] - z_offset)
             prev_pos = pos
-        # append last row
         probed_matrix.append(row)
 
         # make sure the y-axis is the correct length
