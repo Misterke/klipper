@@ -74,6 +74,9 @@ class PrinterProbe:
         self.gcode.register_command('Z_OFFSET_APPLY_PROBE',
                                     self.cmd_Z_OFFSET_APPLY_PROBE,
                                     desc=self.cmd_Z_OFFSET_APPLY_PROBE_help)
+        self.gcode.register_command('NOTE_Z_NOT_HOMED',
+                                    self.cmd_NOTE_Z_NOT_HOMED,
+                                    desc=self.cmd_NOTE_Z_NOT_HOMED_help)
     def _handle_homing_move_begin(self, hmove):
         if self.mcu_probe in hmove.get_mcu_endstops():
             self.mcu_probe.probe_prepare(hmove)
@@ -290,6 +293,11 @@ class PrinterProbe:
                 % (self.name, new_calibrate))
             configfile.set(self.name, 'z_offset', "%.3f" % (new_calibrate,))
     cmd_Z_OFFSET_APPLY_PROBE_help = "Adjust the probe's z_offset"
+    def cmd_NOTE_Z_NOT_HOMED(self,gcmd):
+        toolhead = self.printer.lookup_object('toolhead')
+        if hasattr(toolhead.get_kinematics(), "note_z_not_homed"):
+            toolhead.get_kinematics().note_z_not_homed()
+    cmd_NOTE_Z_NOT_HOMED_help = "Mark Z axis as not homed"
 
 # Endstop wrapper that enables probe specific features
 class ProbeEndstopWrapper:
