@@ -854,11 +854,6 @@ class BedMeshCalibrate:
                         % (off_pt[0], off_pt[1], probed[0], probed[1]))
             positions = corrected_pts
 
-        if self.relative_reference_index is not None:
-            # zero out probe z offset and
-            # set offset relative to reference index
-            z_offset = positions[self.relative_reference_index][2]
-
         order = params['order']
 
         probed_matrix = []
