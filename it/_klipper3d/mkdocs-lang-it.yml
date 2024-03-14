@@ -116,7 +116,6 @@ nav:
       - Manual_Level.md
       - Bed_Mesh.md
       - Endstop_Phase.md
-      - Axis_Twist_Compensation.md
     - Compensazione della risonanza:
       - Resonance_Compensation.md
       - Measuring_Resonances.md
@@ -149,7 +148,6 @@ nav:
     - Beaglebone.md
     - Bootloaders.md
     - CANBUS.md
-    - CANBUS_Troubleshooting.md
     - TSL1401CL_Filament_Width_Sensor.md
     - Hall_Filament_Width_Sensor.md
   - Sponsors.md
