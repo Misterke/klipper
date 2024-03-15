@@ -188,7 +188,8 @@ class PrinterProbe:
             positions.append(pos)
             # Check samples tolerance
             avg, dsq, devsq = self._calc_avgdevsq([p[2] for p in positions])
-            if len(positions) >= sample_count and devsq <= samples_tolerance*samples_tolerance:
+            if len(positions) >= sample_count and \
+                    devsq <= samples_tolerance*samples_tolerance:
                 break
             # If we reach the max sample count and still have
             # not reached the correct tolerance, we remove the
