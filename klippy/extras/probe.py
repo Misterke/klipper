@@ -181,12 +181,17 @@ class PrinterProbe:
             # If we want to sample until a certain tolerance,
             # the max number of samples is higher ...
             max_sample_count = sample_count + samples_retries
+        probe_count = 0
         while len(positions) < max_sample_count:
             # Probe position
             pos = self._probe(speed)
             positions.append(pos)
+            probe_count += 1
             # Check samples tolerance
             avg, dsq, devsq = self._calc_avgdevsq([p[2] for p in positions])
+            gcmd.respond_info("%d samples, avg: %.4f, devsq: %.8f, tolerance: %.8f"
+                              % (len(positions), avg, devsq,
+                                 samples_tolerance*samples_tolerance))
             if len(positions) >= sample_count and \
                     devsq <= samples_tolerance*samples_tolerance:
                 break
@@ -194,7 +199,14 @@ class PrinterProbe:
             # not reached the correct tolerance, we remove the
             # worst outlier ...
             if len(positions) >= max_sample_count:
-                del positions[dsq.index(max(dsq))]
+                if probe_count % (2*max_sample_count) == 0:
+                    # A long run of bad samples is keeping the average around
+                    # itself and blocking newer samples from taking control.
+                    # Start over completely!
+                    positions = []
+                else:
+                    # Just delete the worst outlier ...
+                    del positions[dsq.index(max(dsq))]
             # Retract
             self._move(probexy + [pos[2] + sample_retract_dist], lift_speed)
         if must_notify_multi_probe:
