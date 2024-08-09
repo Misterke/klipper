@@ -60,6 +60,9 @@ class ProbeCommandHelper:
         gcode.register_command('Z_OFFSET_APPLY_PROBE',
                                self.cmd_Z_OFFSET_APPLY_PROBE,
                                desc=self.cmd_Z_OFFSET_APPLY_PROBE_help)
+        self.gcode.register_command('NOTE_Z_NOT_HOMED',
+                                    self.cmd_NOTE_Z_NOT_HOMED,
+                                    desc=self.cmd_NOTE_Z_NOT_HOMED_help)
     def _move(self, coord, speed):
         self.printer.lookup_object('toolhead').manual_move(coord, speed)
     def get_status(self, eventtime):
@@ -138,6 +141,8 @@ class ProbeCommandHelper:
             liftpos = [None, None, pos[2] + params['sample_retract_dist']]
             self._move(liftpos, params['lift_speed'])
         positions = probe_session.pull_probed_results()
+        if self.inversed_order:
+            positions.reverse()
         probe_session.end_probe_session()
         # Calculate maximum, minimum and average values
         max_value = max([p[2] for p in positions])
@@ -171,6 +176,11 @@ class ProbeCommandHelper:
             % (self.name, new_calibrate))
         configfile = self.printer.lookup_object('configfile')
         configfile.set(self.name, 'z_offset', "%.3f" % (new_calibrate,))
+    def cmd_NOTE_Z_NOT_HOMED(self,gcmd):
+        toolhead = self.printer.lookup_object('toolhead')
+        if hasattr(toolhead.get_kinematics(), "note_z_not_homed"):
+            toolhead.get_kinematics().note_z_not_homed()
+    cmd_NOTE_Z_NOT_HOMED_help = "Mark Z axis as not homed"
 
 # Homing via probe:z_virtual_endstop
 class HomingViaProbeHelper:
@@ -328,32 +338,54 @@ class ProbeSessionHelper:
         gcode.respond_info("probe at %.3f,%.3f is z=%.6f"
                            % (epos[0], epos[1], epos[2]))
         return epos[:3]
+    def _calc_avgdevsq(self, z_positions):
+        count = float(len(z_positions))
+        avg = sum(z_positions) / count
+        dsq = [(z-avg)*(z-avg) for z in z_positions]
+        return avg, dsq, sum(dsq) / count
     def run_probe(self, gcmd):
         if not self.multi_probe_pending:
             self._probe_state_error()
         params = self.get_probe_params(gcmd)
         toolhead = self.printer.lookup_object('toolhead')
         probexy = toolhead.get_position()[:2]
-        retries = 0
         positions = []
         sample_count = params['samples']
-        while len(positions) < sample_count:
+        max_sample_count = sample_count
+        if params['samples_tolerance'] > 0 and params['samples_retries'] > 0:
+            # If we want to sample until a certain tolerance,
+            # the max number of samples is higher ...
+            max_sample_count = sample_count + params['samples_retries']
+        probe_count = 0
+        while len(positions) < max_sample_count:
             # Probe position
             pos = self._probe(params['probe_speed'])
             positions.append(pos)
+            probe_count += 1
             # Check samples tolerance
-            z_positions = [p[2] for p in positions]
-            if max(z_positions)-min(z_positions) > params['samples_tolerance']:
-                if retries >= params['samples_tolerance_retries']:
-                    raise gcmd.error("Probe samples exceed samples_tolerance")
-                gcmd.respond_info("Probe samples exceed tolerance. Retrying...")
-                retries += 1
-                positions = []
+            avg, dsq, devsq = self._calc_avgdevsq([p[2] for p in positions])
+            gcmd.respond_info("%d samples, avg: %.4f, devsq: %.8f, tolerance: %.8f"
+                              % (len(positions), avg, devsq,
+                                 params['samples_tolerance']*params['samples_tolerance']))
+            if len(positions) >= sample_count and \
+                    devsq <= params['samples_tolerance']*params['samples_tolerance']:
+                break
+            # If we reach the max sample count and still have
+            # not reached the correct tolerance, we remove the
+            # worst outlier ...
+            if len(positions) >= max_sample_count:
+                if probe_count % (2*max_sample_count) == 0:
+                    # A long run of bad samples is keeping the average around
+                    # itself and blocking newer samples from taking control.
+                    # Start over completely!
+                    positions = []
+                else:
+                    # Just delete the worst outlier ...
+                    del positions[dsq.index(max(dsq))]
             # Retract
-            if len(positions) < sample_count:
-                toolhead.manual_move(
-                    probexy + [pos[2] + params['sample_retract_dist']],
-                    params['lift_speed'])
+            toolhead.manual_move(
+                probexy + [pos[2] + params['sample_retract_dist']],
+                params['lift_speed'])
         # Calculate result
         epos = calc_probe_z_average(positions, params['samples_result'])
         self.results.append(epos)
@@ -391,6 +423,8 @@ class ProbePointsHelper:
                                                 parser=float, count=2)
         def_move_z = config.getfloat('horizontal_move_z', 5.)
         self.default_horizontal_move_z = def_move_z
+        self.fast_drop_z = config.getfloat('fast_drop_z', def_move_z)
+        self.inversed_order = False
         self.speed = config.getfloat('speed', 50., above=0.)
         self.use_offsets = False
         # Internal probing state
@@ -401,6 +435,8 @@ class ProbePointsHelper:
         if len(self.probe_points) < n:
             raise self.printer.config_error(
                 "Need at least %d probe points for %s" % (n, self.name))
+    def inverse_order(self,i=None):
+        self.inversed_order = (not self.inversed_order) if i is None else i
     def update_probe_points(self, points, min_points):
         self.probe_points = points
         self.minimum_points(min_points)
@@ -425,11 +461,14 @@ class ProbePointsHelper:
         return res != "retry"
     def _move_next(self, probe_num):
         # Move to next XY probe point
-        nextpos = list(self.probe_points[probe_num])
+        nextpos = list(self.probe_points[(
+            len(self.probe_points) - 1 - probe_num) if self.inversed_order else probe_num])
         if self.use_offsets:
             nextpos[0] -= self.probe_offsets[0]
             nextpos[1] -= self.probe_offsets[1]
         self._move(nextpos, self.speed)
+        if self.fast_drop_z != self.horizontal_move_z:
+            self._move([None, None, self.fast_drop_z], self.speed)
     def start_probe(self, gcmd):
         manual_probe.verify_no_manual_probe(self.printer)
         # Lookup objects
