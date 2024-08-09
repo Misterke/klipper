@@ -141,6 +141,7 @@ class ZTilt:
     cmd_Z_TILT_ADJUST_help = "Adjust the Z tilt"
     def cmd_Z_TILT_ADJUST(self, gcmd):
         self.z_status.reset()
+        self.probe_helper.inverse_order(False)
         self.retry_helper.start(gcmd)
         self.probe_helper.start_probe(gcmd)
     def probe_finalize(self, offsets, positions):
@@ -170,6 +171,7 @@ class ZTilt:
         adjustments = [x*x_adjust + y*y_adjust + z_adjust
                        for x, y in self.z_positions]
         self.z_helper.adjust_steppers(adjustments, speed)
+        self.probe_helper.inverse_order()
         return self.z_status.check_retry_result(
             self.retry_helper.check_retry([p[2] for p in positions]))
     def get_status(self, eventtime):
