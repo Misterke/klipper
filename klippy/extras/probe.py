@@ -60,9 +60,9 @@ class ProbeCommandHelper:
         gcode.register_command('Z_OFFSET_APPLY_PROBE',
                                self.cmd_Z_OFFSET_APPLY_PROBE,
                                desc=self.cmd_Z_OFFSET_APPLY_PROBE_help)
-        self.gcode.register_command('NOTE_Z_NOT_HOMED',
-                                    self.cmd_NOTE_Z_NOT_HOMED,
-                                    desc=self.cmd_NOTE_Z_NOT_HOMED_help)
+        gcode.register_command('NOTE_Z_NOT_HOMED',
+                               self.cmd_NOTE_Z_NOT_HOMED,
+                               desc=self.cmd_NOTE_Z_NOT_HOMED_help)
     def _move(self, coord, speed):
         self.printer.lookup_object('toolhead').manual_move(coord, speed)
     def get_status(self, eventtime):
@@ -352,11 +352,15 @@ class ProbeSessionHelper:
         positions = []
         sample_count = params['samples']
         max_sample_count = sample_count
-        if params['samples_tolerance'] > 0 and params['samples_retries'] > 0:
+        if params['samples_tolerance'] > 0 and \
+                params['samples_tolerance_retries'] > 0:
             # If we want to sample until a certain tolerance,
             # the max number of samples is higher ...
-            max_sample_count = sample_count + params['samples_retries']
+            max_sample_count = sample_count + \
+                params['samples_tolerance_retries']
         probe_count = 0
+        tolerance = params['samples_tolerance']
+        tolerance *= tolerance
         while len(positions) < max_sample_count:
             # Probe position
             pos = self._probe(params['probe_speed'])
@@ -364,11 +368,10 @@ class ProbeSessionHelper:
             probe_count += 1
             # Check samples tolerance
             avg, dsq, devsq = self._calc_avgdevsq([p[2] for p in positions])
-            gcmd.respond_info("%d samples, avg: %.4f, devsq: %.8f, tolerance: %.8f"
-                              % (len(positions), avg, devsq,
-                                 params['samples_tolerance']*params['samples_tolerance']))
-            if len(positions) >= sample_count and \
-                    devsq <= params['samples_tolerance']*params['samples_tolerance']:
+            gcmd.respond_info(
+                "%d samples, avg: %.4f, devsq: %.8f, tolerance: %.8f"
+                % (len(positions), avg, devsq, tolerance))
+            if len(positions) >= sample_count and devsq <= tolerance:
                 break
             # If we reach the max sample count and still have
             # not reached the correct tolerance, we remove the
@@ -462,7 +465,8 @@ class ProbePointsHelper:
     def _move_next(self, probe_num):
         # Move to next XY probe point
         nextpos = list(self.probe_points[(
-            len(self.probe_points) - 1 - probe_num) if self.inversed_order else probe_num])
+            len(self.probe_points) - 1 - probe_num)
+            if self.inversed_order else probe_num])
         if self.use_offsets:
             nextpos[0] -= self.probe_offsets[0]
             nextpos[1] -= self.probe_offsets[1]
