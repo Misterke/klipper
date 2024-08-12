@@ -918,7 +918,7 @@ class ProbeManager:
         pos_y = min_y
         points = []
 
-        order = self.mesh_config['order']
+        order = mesh_config['order']
         if order == 'spiral':
             # We want to end at the front-left, so we start there
             # and walk in the intended direction until we hit a
@@ -960,16 +960,16 @@ class ProbeManager:
                     else:
                         # move in negative direction
                         pos_x = max_x - j * x_dist
-                    if self.radius is None:
+                    if radius is None:
                         # rectangular bed, append
                         points.append((pos_x, pos_y))
                     else:
                         # round bed, check distance from origin
                         dist_from_origin = math.sqrt(pos_x*pos_x + pos_y*pos_y)
-                        if dist_from_origin <= self.radius:
+                        if dist_from_origin <= radius:
                             points.append(
-                                (self.origin[0] + pos_x,
-                                 self.origin[1] + pos_y))
+                                (origin[0] + pos_x,
+                                 origin[1] + pos_y))
                 pos_y += y_dist
             if order == 'reverse':
                 points.reverse()
