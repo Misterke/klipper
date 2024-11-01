@@ -3,7 +3,7 @@
 # Copyright (C) 2018-2019 Eric Callahan <arksine.code@gmail.com>
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
-import logging, math, json, collections
+import logging, math, json, ast, collections
 from . import probe
 from extras.danger_options import get_danger_options
 
@@ -19,6 +19,7 @@ PROFILE_OPTIONS = {
     "mesh_y_pps": int,
     "algo": str,
     "tension": float,
+    "order": str,
 }
 
 
@@ -364,7 +365,7 @@ class BedMeshCalibrate:
 
     def __init__(self, config, bedmesh):
         self.printer = config.get_printer()
-        self.orig_config = {"radius": None, "origin": None}
+        self.orig_config = {"radius": None, "origin": None, 'order': ''}
         self.radius = self.origin = None
         self.mesh_min = self.mesh_max = (0.0, 0.0)
         self.adaptive_margin = config.getfloat("adaptive_margin", 0.0)
@@ -415,25 +416,63 @@ class BedMeshCalibrate:
             max_x = min_x + x_dist * (x_cnt - 1)
         pos_y = min_y
         points = []
-        for i in range(y_cnt):
-            for j in range(x_cnt):
-                if not i % 2:
-                    # move in positive directon
-                    pos_x = min_x + j * x_dist
-                else:
-                    # move in negative direction
-                    pos_x = max_x - j * x_dist
-                if self.radius is None:
-                    # rectangular bed, append
-                    points.append((pos_x, pos_y))
-                else:
-                    # round bed, check distance from origin
-                    dist_from_origin = math.sqrt(pos_x * pos_x + pos_y * pos_y)
-                    if dist_from_origin <= self.radius:
-                        points.append(
-                            (self.origin[0] + pos_x, self.origin[1] + pos_y)
-                        )
-            pos_y += y_dist
+
+        order = self.mesh_config['order']
+        if order == 'spiral':
+            # We want to end at the front-left, so we start there
+            # and walk in the intended direction until we hit a
+            # limit, at which point that limit changes and we turn
+            # 90 degrees ...
+            wall_thickness = 0
+            i = 0
+            j = 0
+            points.append((min_x, min_y))
+            while True:
+                if i >= y_cnt - 1 - wall_thickness:
+                    break
+                while i < y_cnt - 1 - wall_thickness:
+                    i += 1
+                    points.append((min_x + j * x_dist, min_y + i * y_dist))
+                if j >= x_cnt - 1 - wall_thickness:
+                    break
+                while j < x_cnt - 1 - wall_thickness:
+                    j += 1
+                    points.append((min_x + j * x_dist, min_y + i * y_dist))
+                if i <= wall_thickness:
+                    break
+                while i > wall_thickness:
+                    i -= 1
+                    points.append((min_x + j * x_dist, min_y + i * y_dist))
+                wall_thickness += 1
+                if j <= wall_thickness:
+                    break
+                while j > wall_thickness:
+                    j -= 1
+                    points.append((min_x + j * x_dist, min_y + i * y_dist))
+            points.reverse()
+        else:
+            for i in range(y_cnt):
+                for j in range(x_cnt):
+                    if not i % 2:
+                        # move in positive directon
+                        pos_x = min_x + j * x_dist
+                    else:
+                        # move in negative direction
+                        pos_x = max_x - j * x_dist
+                    if self.radius is None:
+                        # rectangular bed, append
+                        points.append((pos_x, pos_y))
+                    else:
+                        # round bed, check distance from origin
+                        dist_from_origin = math.sqrt(pos_x * pos_x + pos_y * pos_y)
+                        if dist_from_origin <= self.radius:
+                            points.append(
+                                (self.origin[0] + pos_x, self.origin[1] + pos_y)
+                            )
+                pos_y += y_dist
+            if order == 'reverse':
+                points.reverse()
+
         self.points = points
         if self.zero_ref_pos is None or probe_method == "manual":
             # Zero Reference Disabled
@@ -465,8 +504,13 @@ class BedMeshCalibrate:
         # Check to see if any points fall within faulty regions
         if probe_method == "manual":
             return
+        if not self.faulty_regions:
+            return
+        if order == 'spiral':
+            raise BedMeshError("bed_mesh: faulty regions are not supported"
+                               " for spiral order")
         last_y = self.points[0][1]
-        is_reversed = False
+        is_reversed = (order == 'reverse') and ((y_cnt % 2) == 0)
         for i, coord in enumerate(self.points):
             if not isclose(coord[1], last_y):
                 is_reversed = not is_reversed
@@ -536,6 +580,7 @@ class BedMeshCalibrate:
     def _init_mesh_config(self, config):
         mesh_cfg = self.mesh_config
         orig_cfg = self.orig_config
+        order = ''
         self.radius = config.getfloat("mesh_radius", None, above=0.0)
         if self.radius is not None:
             self.origin = config.getfloatlist(
@@ -560,6 +605,8 @@ class BedMeshCalibrate:
             max_x, max_y = config.getfloatlist("mesh_max", count=2)
             if max_x <= min_x or max_y <= min_y:
                 raise config.error("bed_mesh: invalid min/max points")
+            order = config.get('order', '').strip().lower()
+        orig_cfg['order'] = mesh_cfg['order'] = order
         orig_cfg["x_count"] = mesh_cfg["x_count"] = x_cnt
         orig_cfg["y_count"] = mesh_cfg["y_count"] = y_cnt
         orig_cfg["mesh_min"] = self.mesh_min = (min_x, min_y)
@@ -842,6 +889,9 @@ class BedMeshCalibrate:
                 self.mesh_config["x_count"] = x_cnt
                 self.mesh_config["y_count"] = y_cnt
                 need_cfg_update = True
+            if "ORDER" in params:
+                self.mesh_config['order'] = gcmd.get('ORDER').strip().lower()
+                need_cfg_update = True
 
         if "ALGORITHM" in params:
             self.mesh_config["algo"] = gcmd.get("ALGORITHM").strip().lower()
@@ -959,6 +1009,11 @@ class BedMeshCalibrate:
                     )
             positions = corrected_pts
 
+        order = params['order']
+
+        # Sort the probed points again ...
+        positions = sorted(positions, key = lambda p:(p[1],p[0]))
+        
         probed_matrix = []
         row = []
         prev_pos = positions[0]
@@ -967,12 +1022,7 @@ class BedMeshCalibrate:
                 # y has changed, append row and start new
                 probed_matrix.append(row)
                 row = []
-            if pos[0] > prev_pos[0]:
-                # probed in the positive direction
-                row.append(pos[2] - z_offset)
-            else:
-                # probed in the negative direction
-                row.insert(0, pos[2] - z_offset)
+            row.append(pos[2] - z_offset)
             prev_pos = pos
         # append last row
         probed_matrix.append(row)
@@ -1029,7 +1079,7 @@ class BedMeshCalibrate:
         self.bedmesh.set_mesh(z_mesh)
         self.gcode.respond_info("Mesh Bed Leveling Complete")
         if self._profile_name is not None:
-            self.bedmesh.save_profile(self._profile_name)
+            self.bedmesh.save_profile(self._profile_name, 1)
 
     def _dump_points(self, probed_pts, corrected_pts, offsets):
         # logs generated points with offset applied, points received
@@ -1504,9 +1554,7 @@ class ProfileManager:
             self.profiles[name] = {}
             zvals = profile.getlists("points", seps=(",", "\n"), parser=float)
             self.profiles[name]["points"] = zvals
-            self.profiles[name]["mesh_params"] = params = (
-                collections.OrderedDict()
-            )
+            self.profiles[name]["mesh_params"] = params = {}
             for key, t in PROFILE_OPTIONS.items():
                 if t is int:
                     params[key] = profile.getint(key)
@@ -1537,7 +1585,7 @@ class ProfileManager:
                 % (("\n").join(self.incompatible_profiles))
             )
 
-    def save_profile(self, prof_name):
+    def save_profile(self, prof_name, quiet):
         z_mesh = self.bedmesh.get_mesh()
         if z_mesh is None:
             self.gcode.respond_info(
@@ -1565,16 +1613,42 @@ class ProfileManager:
         profiles = dict(self.profiles)
         profiles[prof_name] = profile = {}
         profile["points"] = probed_matrix
-        profile["mesh_params"] = collections.OrderedDict(mesh_params)
+        profile["mesh_params"] = dict(mesh_params)
         self.profiles = profiles
         self.bedmesh.update_status()
-        self.gcode.respond_info(
-            "Bed Mesh state has been saved to profile [%s]\n"
-            "for the current session.  The SAVE_CONFIG command will\n"
-            "update the printer config file and restart the printer."
-            % (prof_name)
-        )
+        if not quiet:
+            self.gcode.respond_info(
+                "Bed Mesh state has been saved to profile [%s]\n"
+                "for the current session.  The SAVE_CONFIG command will\n"
+                "update the printer config file and restart the printer."
+                % (prof_name)
+            )
 
+    def set_profile(self, profile, quiet):
+        try:
+            profile = ast.literal_eval(profile)
+            probed_matrix = profile["points"]
+            mesh_params = profile["mesh_params"];
+            for key, t in PROFILE_OPTIONS.items():
+                if t is int:
+                    mesh_params[key] = int(mesh_params[key])
+                elif t is float:
+                    mesh_params[key] = float(mesh_params[key])
+                elif t is str:
+                    mesh_params[key] = str(mesh_params[key])
+            z_mesh = ZMesh(mesh_params)
+            try:
+                z_mesh.build_mesh(probed_matrix)
+            except BedMeshError as e:
+                raise self.gcode.error(str(e))
+            self.current_profile = "default"
+            self.bedmesh.set_mesh(z_mesh)
+            if not quiet:
+                self.gcode.respond_info(
+                    "Bed Mesh state set to profile \"default\".")
+        except:
+            raise self.gcode.error(traceback.format_exc())
+        
     def load_profile(self, prof_name):
         profile = self.profiles.get(prof_name, None)
         if profile is None:
@@ -1588,7 +1662,7 @@ class ProfileManager:
             raise self.gcode.error(str(e))
         self.bedmesh.set_mesh(z_mesh)
 
-    def remove_profile(self, prof_name):
+    def remove_profile(self, prof_name, quiet):
         if prof_name in self.profiles:
             configfile = self.printer.lookup_object("configfile")
             configfile.remove_section("bed_mesh " + prof_name)
@@ -1596,21 +1670,24 @@ class ProfileManager:
             del profiles[prof_name]
             self.profiles = profiles
             self.bedmesh.update_status()
-            self.gcode.respond_info(
-                "Profile [%s] removed from storage for this session.\n"
-                "The SAVE_CONFIG command will update the printer\n"
-                "configuration and restart the printer" % (prof_name)
-            )
+            if not quiet:
+                self.gcode.respond_info(
+                    "Profile [%s] removed from storage for this session.\n"
+                    "The SAVE_CONFIG command will update the printer\n"
+                    "configuration and restart the printer" % (prof_name)
+                )
         else:
-            self.gcode.respond_info(
-                "No profile named [%s] to remove" % (prof_name)
-            )
+            if not quiet:
+                self.gcode.respond_info(
+                    "No profile named [%s] to remove" % (prof_name)
+                )
 
     cmd_BED_MESH_PROFILE_help = "Bed Mesh Persistent Storage management"
 
     def cmd_BED_MESH_PROFILE(self, gcmd):
         options = collections.OrderedDict(
             {
+                "SET": self.set_profile,
                 "LOAD": self.load_profile,
                 "SAVE": self.save_profile,
                 "REMOVE": self.remove_profile,
@@ -1629,7 +1706,7 @@ class ProfileManager:
                         " another profile name."
                     )
                 else:
-                    options[key](name)
+                    options[key](name, gcmd.get_int("QUIET", 0))
                 return
         gcmd.respond_info("Invalid syntax '%s'" % (gcmd.get_commandline(),))
 
