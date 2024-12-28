@@ -346,8 +346,6 @@ class PrinterProbe:
             # Retract
             liftpos = [None, None, pos[2] + sample_retract_dist]
             self._move(liftpos, lift_speed)
-        if self.inversed_order:
-            positions.reverse()
         self.multi_probe_end()
         # Calculate maximum, minimum and average values
         max_value = max([p[2] for p in positions])
