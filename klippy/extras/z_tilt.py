@@ -170,6 +170,7 @@ class ZTilt:
         self.z_positions = config.getlists(
             "z_positions", seps=(",", "\n"), parser=float, count=2
         )
+        self.last_positions = []
         self.retry_helper = RetryHelper(config)
         self.probe_helper = probe.ProbePointsHelper(config, self.probe_finalize)
         self.probe_helper.minimum_points(2)
@@ -232,12 +233,15 @@ class ZTilt:
         ]
         self.z_helper.adjust_steppers(adjustments, speed)
         self.probe_helper.inverse_order()
+        self.last_positions = [p[2] for p in positions]
         return self.z_status.check_retry_result(
-            self.retry_helper.check_retry([p[2] for p in positions])
+            self.retry_helper.check_retry(self.last_positions)
         )
 
     def get_status(self, eventtime):
-        return self.z_status.get_status(eventtime)
+        result = self.z_status.get_status(eventtime)
+        result["last_positions"] = self.last_positions
+        return result
 
 
 def load_config(config):
