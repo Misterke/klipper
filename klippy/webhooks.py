@@ -496,6 +496,10 @@ class GCodeHelper:
     def __init__(self, printer):
         self.printer = printer
         self.gcode = printer.lookup_object("gcode")
+        self.lastScript = os.path.join(
+            os.path.dirname(printer.get_start_args().get("log_file")),
+            "last_gcode.log"
+        )
         # Output subscription tracking
         self.is_output_registered = False
         self.clients = {}
@@ -515,7 +519,15 @@ class GCodeHelper:
         web_request.send(self.gcode.get_command_help())
 
     def _handle_script(self, web_request):
-        self.gcode.run_script(web_request.get_str("script"))
+        script = web_request.get_str("script")
+        try:
+            f = open(self.lastScript, "w")
+            f.write(script)
+            f.close()
+        except:
+            logging.info("webhooks: could not save last script to '%s'" % (self.lastScript))
+        logging.info("webhooks: Received gcode '%s'" % (script))
+        self.gcode.run_script(script)
 
     def _handle_restart(self, web_request):
         self.gcode.run_script("restart")
